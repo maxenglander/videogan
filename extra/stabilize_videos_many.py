@@ -1,6 +1,6 @@
 # hackery for opencv to use sift
 import sys
-sys.path.insert(0, "/data/vision/torralba/commonsense/future/opencv-2.4.11/install/lib/python2.7/dist-packages")
+#sys.path.insert(0, "/data/vision/torralba/commonsense/future/opencv-2.4.11/install/lib/python2.7/dist-packages")
 
 import numpy as np
 import cv2
@@ -15,13 +15,16 @@ MIN_MATCH_COUNT = 10
 VIDEO_SIZE = 128
 CROP_SIZE = 128
 MAX_FRAMES = 33
-MIN_FRAMES = 16
-FRAMES_DELAY = 2
+MIN_FRAMES = 0
+FRAMES_DELAY = 0
 
 def get_video_info(video):
     stats = subprocess.check_output("ffprobe -select_streams v -v error -show_entries stream=width,height,duration -of default=noprint_wrappers=1 {}".format(video), shell = True)
-    info = dict(x.split("=") for x in stats.strip().split("\n"))
-    print info
+    decode_stats = stats.decode('utf-8');
+    strip_stats = decode_stats.strip()
+    split_stats = strip_stats.split("\n")
+    info = dict(x.split("=") for x in split_stats)
+    print(info)
     return {"width": int(info['width']),
             "height": int(info['height']),
             "duration": float(info['duration'])}
@@ -40,6 +43,9 @@ class FrameReader(object):
 
     def __iter__(self):
         return self
+
+    def __next__(self):
+        return self.next()
 
     def next(self):
         raw_image = self.pipe.stdout.read(self.info['width']*self.info['height']*3)
@@ -77,10 +83,10 @@ def process_im(im):
     h = im.shape[0]
     w = im.shape[1]
 
-    h_start = h / 2  - CROP_SIZE / 2
+    h_start = h // 2  - CROP_SIZE // 2
     h_stop = h_start + CROP_SIZE 
 
-    w_start = w / 2  - CROP_SIZE / 2
+    w_start = w // 2  - CROP_SIZE // 2
     w_stop = w_start + CROP_SIZE 
 
     im = im[h_start:h_stop, w_start:w_stop, :]
@@ -88,20 +94,25 @@ def process_im(im):
     return im
 
 def compute(video, frame_dir):
+    print(video)
+    print(frame_dir)
+
     try:
         frames = FrameReader(video)
     except subprocess.CalledProcessError:
-        print "failed due to CalledProcessError"
+        print("failed due to CalledProcessError")
         return False
 
     for _ in range(FRAMES_DELAY):
         try:
             frames.next()
+            print('skipped frame')
         except StopIteration:
+            print('no more frames')
             return False
 
     # Initiate SIFT detector
-    sift = cv2.SIFT()
+    sift = cv2.xfeatures2d.SIFT_create()
     #sift = cv2.ORB()
     #sift = cv2.BRISK()
 
@@ -115,8 +126,9 @@ def compute(video, frame_dir):
     for _ in range(100):
         try:
             img2 = frames.next()
+            print('moved to next frame')
         except StopIteration:
-            print "end of stream"
+            print("end of stream")
             break
 
         bg_img = process_im(img2.copy())
@@ -134,11 +146,11 @@ def compute(video, frame_dir):
             #img1 = cv2.imread(im1,0)
             kp1, des1 = sift.detectAndCompute(img1,None)
             if des1 is None or des2 is None:
-                print "Empty matches"
+                print("Empty matches")
                 M = np.eye(3)
                 failed = True
             elif len(kp1) < 2 or len(kp2) < 2:
-                print "Not enough key points"
+                print("Not enough key points")
                 M = np.eye(3)
                 failed = True
             else:
@@ -155,7 +167,7 @@ def compute(video, frame_dir):
 
                     M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
                 else:
-                    print "Not enough matches are found - %d/%d" % (len(good),MIN_MATCH_COUNT)
+                    print("Not enough matches are found - %d/%d" % (len(good),MIN_MATCH_COUNT))
 
                     M = np.eye(3)
                     failed = True
@@ -191,18 +203,18 @@ def compute(video, frame_dir):
                 break
 
         if len(movie) < MIN_FRAMES:
-            print "this movie clip is too short, causing fail"
+            print("this movie clip is too short, causing fail")
             failed = True
 
         if failed:
-            print "aborting movie clip due to failure"
+            print("aborting movie clip due to failure")
         else:   
             # write a column stacked image so it can be loaded at once, which
             # will hopefully reduce IO significantly
             stacked = np.vstack(movie)
             movie_clip_filename = frame_dir + "/%04d.jpg" % movie_clip
             movie_clip_files.append(movie_clip_filename)
-            print "writing {}".format(movie_clip_filename)
+            print("writing {}".format(movie_clip_filename))
             cv2.imwrite(movie_clip_filename, stacked)
             movie_clip += 1
 
@@ -222,7 +234,7 @@ for video in work:
     lock_file = stable_path + ".lock"
 
     if os.path.exists(stable_path) or os.path.exists(lock_file):
-        print "already done: {}".format(stable_path)
+        print("already done: {}".format(stable_path))
         continue
 
     try:
@@ -238,10 +250,12 @@ for video in work:
     except OSError:
         pass
 
-    print video
+    print(video)
 
     #result = compute("videos/" + video, stable_path)
+    print('computing')
     result = compute(video, stable_path)
+    print('computed')
 
     try:
         os.rmdir(lock_file)
